@@ -1,0 +1,7 @@
+step,element,intro,position,question
+1,#step1,Please select your location by clicking on a flag or name of the country from the list below,auto,"1, 5"
+2,#step2,Please tick by selecting the appropriate length of time of your involvement (pick from one),auto,"1, 11"
+4,#step4,Select the answer that applied to your organisation by clicking on the right hand side of the box ,auto,"2, 6a"
+5,#step5,Please tick by selecting the appropriate length of time (pick from one),auto,"2, 6c"
+6,#step6,Please insert the appropriate percentage in the centre of the circle below,auto,"2, 7d"
+8,#step8,Please tick by selecting the appropriate answer (pick from one),auto,"3, 8a"

@@ -1,0 +1,26 @@
+@import url("//fonts.googleapis.com/css?family=Lobster|Cabin:400,700");
+
+h2 {
+  font-family: 'Lobster', cursive;
+  font-weight: 500;
+  line-height: 1.1;
+  color: #1d22ad;
+}
+
+h4 {
+  font-family: 'Lobster', cursive;
+  font-weight: 200
+  line-height: 0.7;
+  color: #1d22ad;
+}
+
+h1 {
+  font-family: 'Lobster', cursive;
+  font-weight: 700
+  line-height: 1.6;
+  color: #1d22ad;
+}
+
+body {
+  background-color: #fff;
+}

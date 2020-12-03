@@ -1,0 +1,12 @@
+name: Dashboard
+title: Dashboard
+username:
+account: avramescu97
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 3344927
+bundleId: 3938095
+url: https://avramescu97.shinyapps.io/Dashboard/
+when: 1607002308.13017
+asMultiple: FALSE
+asStatic: FALSE

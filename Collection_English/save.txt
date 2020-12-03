@@ -1,0 +1,1052 @@
+library(shiny)
+library(shinyBS)
+library(jsonlite)
+library(shinymanager)
+library(dplyr)
+library(magrittr)
+library(DT)
+library(shinyWidgets)
+library(shinyalert)
+
+countries <- list(
+  "France", "United Kingdom", "Germany", "United States of America", "Belgium", "China", "Spain", "Netherlands", "Mexico",
+  "Italy", "Canada", "Brazil", "Denmark", "Norway", "Switzerland", "Luxembourg", "Israel", "Russian Federation",
+  "Turkey", "Saudi Arabia", "United Arab Emirates"
+)
+flags <- c("fr", "gb", "de", "us", "be", "cn", "es", "nl", "mx", "it", "ca", "br", "dk", "no", "ch", "lu", "il", "ru", "tr", "sa", "ae")
+flags <- sprintf("https://cdn.rawgit.com/lipis/flag-icon-css/master/flags/4x3/%s.svg", flags)
+
+inactivity <- "function idleTimer() {
+var t = setTimeout(logout, 120000);
+window.onmousemove = resetTimer; // catches mouse movements
+window.onmousedown = resetTimer; // catches mouse movements
+window.onclick = resetTimer;     // catches mouse clicks
+window.onscroll = resetTimer;    // catches scrolling
+window.onkeypress = resetTimer;  //catches keyboard actions
+
+function logout() {
+window.close();  //close the window
+}
+
+function resetTimer() {
+clearTimeout(t);
+t = setTimeout(logout, 120000);  // time is in milliseconds (1000 is 1 second)
+}
+}
+idleTimer();"
+
+
+# data.frame with credentials info
+credentials <- data.frame(
+  user = c("InPlaceofWar", "1"),
+  password = c("InPlaceofWarEnglishQuestionnaire", "1"),
+  stringsAsFactors = FALSE
+)
+
+# add an asterisk to an input label
+labelMandatory <- function(label) {
+  tagList(
+    label,
+    span("*", class = "mandatory_star")
+  )
+}
+
+outputDir <- "output"
+
+# get current Epoch time
+epochTime <- function() {
+  return(as.integer(Sys.time()))
+}
+
+# get a formatted string of the timestamp (exclude colons as they are invalid
+# characters in Windows filenames)
+humanTime <- function() {
+  format(Sys.time(), "%Y%m%d-%H%M%OS")
+}
+
+# save the results to a file
+saveData <- function(data) {
+  fileName <- sprintf("%s_%s.csv",
+                      humanTime(),
+                      digest::digest(data))
+  
+  write.csv(x = data, file = file.path(responsesDir, fileName),
+            row.names = FALSE, quote = TRUE)
+}
+
+# load all responses into a data.frame
+loadData <- function() {
+  files <- list.files(file.path(responsesDir), full.names = TRUE)
+  data <- lapply(files, read.csv, stringsAsFactors = FALSE)
+  #data <- dplyr::rbind_all(data)
+  data <- do.call(rbind, data)
+  data
+}
+
+# directory where responses get stored
+responsesDir <- file.path("responses")
+
+# CSS to use in the app
+appCSS <-
+  ".mandatory_star { color: red; }
+   .shiny-input-container { margin-top: 25px; }
+   #submit_msg { margin-left: 15px; }
+   #error { color: red; }
+   body { background: #fcfcfc; }
+   #header { background: #fff; border-bottom: 1px solid #ddd; margin: -20px -15px 0; padding: 15px 15px 10px; }
+  "
+
+# Extend shinyjs to scroll
+jsCode <- "shinyjs.scrolltop = function() {instructions_description.scrollTo(0, 0); actions_task.scrollTo(0, 0)};"
+
+
+# In the below function we need the values for ALL questions
+fieldsAll <- c("name", "organisation", "date_from", "location", "gender", "age", "activity1", "function", "function_other", "activity", "activity_other", "time", "currency", "fin_support_time", "fin_support_tot", "fin_support_year3",
+               "fin_support_year2", "fin_support_year1", "fin_support_1", "fin_support_2", "fin_support_3", "fin_support_4", "fin_support_5", "hours", "post_hours", "pers_income",
+               "opportunity1", "opportunity2", "opportunity2_other", "income_change", "revenue_change", "volunteer", "volunteer_num", "volunteer_hours", "volunteer_resp", "perc_employees", "perc_rent", "perc_equipment",
+               "perc_donation", "perc_events", "perc_training", "perc_other", "budget", "budget_upload", "comment1", "other_funding", "other_funding1", "ipow_funding_imp", "ipow_funding_imp2", 
+               "ipow_funding_diff", "ipow_funding_diff2", "ipow_funding_comm", "ipow_funding_comm2", "ipow_funding_help", "ipow_funding_help2", "ipow_funding_depend", "ipow_funding_depend2", "ipow_funding_time",
+               "ipow_funding_time2", "apprentice_yes", "ipow_funding_future", "ipow_funding_future2", "sustainable", "sustainable_time", "sustainable3", 
+               "activities", "activities_other", "activities_num", "activities_reason", "activities_fund", "activities_new", "extra_funding", "extra_funding2", "activities_change", "activities_change2",
+               "part_men", "part_women", "part_neutral", "part_age", "part_status", "part_continue", "part_words", "part_words2", "part_change",
+               "part_change2", "participation_benefit", 
+               "participation_benefit2", "skills", "skills2", "skills_where", "skills_where2", "skills_details", "resources", "continue_part",
+               "apprentice", "needs_community", "needs_find", "needs_met", "more_part", "success_words", "success_words2", "participants_change",
+               "training", "training_type", "training_type2", "training_change", "training_change2", "training_others", "training_others2",
+               "training_relevant", "training_relevant2", "training_long_term")
+
+# In the below function we put the MANDATORY fields
+fieldsMandatory <- c("name", "organisation", "location", "date_from", "gender", "age", "activity1", "function", "function_other", 
+                     "activity", "pers_income", "activity_other", "time", "currency", "fin_support_time", "fin_support_tot", "fin_support_year3",
+                     "fin_support_year2", "fin_support_year1", "fin_support_1", "hours", "post_hours", "pers_income","opportunity1",
+                     "volunteer", "other_funding", "other_funding1", "ipow_funding_imp", 
+                     "ipow_funding_diff", "ipow_funding_comm", "ipow_funding_depend", "ipow_funding_time", 
+                     "ipow_funding_future", "sustainable", "activities", "activities_num", "activities_reason",
+                     "activities_fund", "activities_new", "extra_funding", "activities_change", "part_men", "part_women", 
+                     "part_neutral", "part_age", "part_status", 
+                     "part_continue", "part_words", "part_change", "participation_benefit", "skills", 
+                     "skills_where", "resources", "continue_part", "apprentice", "needs_community", "needs_find", 
+                     "needs_met", "more_part",
+                     "success_words", "participants_change", "training", "training_long_term")
+
+ui = secure_app(head_auth = tags$script(inactivity),
+                  fluidPage(
+                  id = "questionnaire",
+                  shinyjs::useShinyjs(),
+                  shinyjs::inlineCSS(appCSS),
+                  title = "In Place of War - Change Maker Cuestionario",
+                  div(id = "header",
+                      h2("Participant Information Sheet - Understanding the Impact of Artistic 
+                               Creativity as a Tool for Social Change")
+                  ),
+                  fluidRow(
+                    column(12,
+                           div( 
+                             id = "form",
+                             tags$p("You are being invited to take part in a research study that aims to assess the 
+                                      long-term impact of In Place of War’s supporting their 
+                                      network of change makers. Before you decide whether to 
+                                      take part, it is important for you to understand why 
+                                      the research is being conducted and what it will 
+                                      involve. Please take time to read the following 
+                                      information carefully before deciding whether to take 
+                                      part and discuss it with others if you wish. Please 
+                                      ask if there is anything that is not clear or if you 
+                                      would like more information. Thank you for taking the 
+                                      time to read this."),
+                             
+                             tags$p(style = 'font-weight:bold; text-decoration: underline; font-size: medium;',
+                                    "About the Research"
+                             ),
+                             
+                             tags$p(style = 'font-weight:bold;', "Who will conduct the research?"),
+                             tags$div("A group of doctoral researchers at the University of Manchester, 
+                               University of Liverpool, and the Royal Northern College of Music (UK).",
+                                      tags$br(),
+                                      tags$ol(
+                                        tags$li("Mr Jack Adler-McKean, Royal Northern College of Music"), 
+                                        tags$li("Ms Safa Ali, School of Environment, Education and Development, The University of Manchester"),
+                                        tags$li("Ms Andreea Avramescu, Alliance Manchester Business School, The University of Manchester"),
+                                        tags$li("Ms Magaly Duarte, School of Environment, Education and Development, The University of Manchester"),
+                                        tags$li("Ms Natalie Emma Ilsley, School of Arts, Languages and Cultures, The University of Manchester"),
+                                        tags$li("Ms Réka Polonyi, School of Arts, Languages and Cultures, The University of Manchester"),
+                                        tags$li("Ms Marta Riccardi, School of Arts, The University of Liverpool"))),
+                             
+                             tags$p(style = 'font-weight:bold;', "What is the purpose of the research?"),
+                             tags$div(
+                               tags$p("In this research project, we are trying to understand the long-term 
+                                        impact of In Place of War’s supporting their network of change makers. 
+                                        In Place of War is a global organisation that uses artistic creativity 
+                                        in places of conflict as a tool for positive change. They enable grassroots 
+                                        change-makers in music, theatre and across the arts to transform cultures 
+                                        of violence and suffering into hope, opportunity and freedom. Their work is 
+                                        based upon creating cultural spaces in areas of upheaval and instability, 
+                                        providing education and training in artistic development and enterprise in 
+                                        the Global South, and enabling international artistic collaboration and 
+                                        mobilisation. "),
+                               tags$p("The immediate success of In Place of War’s programmes has been consistently 
+                                        demonstrated across the globe. However, the nature of project-based work 
+                                        severely hinders their ability to track long-term goals as funding is only 
+                                        provided over a fixed timespan with limited available human resources. In 
+                                        order to build upon the organisation’s strengths and secure sustained financial 
+                                        support, In Place of War needs to be able to demonstrate the ongoing impact of 
+                                        their work in a manner that can be applied to past, present and future programmes."),
+                               tags$p("You have been asked to take part because you are a change maker for In Place of War 
+                                        and you are based in South Africa, Colombia, Uganda, Lebanon and Palestine.")),
+                             
+                             tags$p(style = 'font-weight:bold;',
+                                    "Will the outcomes of the research be published?"),
+                             tags$p("Your contributions will help to understand the social and economic impact of In Place of War’s 
+                                      support. We will use the responses garnered from the questionnaires to inform a report outlining 
+                                      the findings and an interface tool for monitoring and tracking the long-term impact of current 
+                                      and future projects. The reports will be made available to you once it is submitted in November 
+                                      2020. Your story will be anonymised so your name and other identifying information will be removed."),
+                             
+                             tags$p(style = 'font-weight:bold;', "Who has reviewed the research project?"),
+                             tags$p("The project has been reviewed by the organisers of In Place of War and Code-Switch Consultants."),
+                             
+                             tags$p(style = 'font-weight:bold;',
+                                    "Who is funding the research project?"),
+                             tags$div(
+                               tags$p("This research is part of a training initiative, Business Challenges, based at the University of Manchester. 
+                                        It is funded by Collaboration Labs and Code-Switch Consultants and is part of the Arts and Humanities 
+                                        Research Council (AHRC), the North West Consortium Doctoral Training Partnership (NWCDTP), the Economic 
+                                        and Social Research Council (ESRC) and North West Social Science Doctoral Training Partnership (NWSSDTP). 
+                                        The project is being over seen by Mr Jack Adler-McKean, Ms Safa Ali, Ms Andreea Avramescu, Ms Magaly Duarte, 
+                                        Ms Natalie Emma Ilsley, Ms Marta Riccardi, Ms Réka Polonyi. It is also being over seen by Hellen Parra Florez, 
+                                        Anna Brady, and Dr Kat Kucaba at Code-Switch Consultants."),
+                               tags$p("More information about Business Challenges can be found here:", 
+                                      tags$a(href = "https://www.humanities.manchester.ac.uk/researcher-development/knowledge-exchange/collaboration-labs/business-challenges-lab/", "Business Challenges Lab", target="_blank"), ".")),
+                             
+                             tags$p(style = 'font-weight:bold; text-decoration: underline; font-size: medium;',
+                                    "What would my involvement be?"
+                             ),
+                             
+                             tags$p(style = 'font-weight:bold;',
+                                    "What would I be asked to do if I took part?"
+                             ),
+                             tags$div(
+                               tags$p("You will be asked to participate in a 30-minute questionnaire. The questionnaire will made available online through Google 
+                                        Forms from 8th September 2020 to 18th September 2020."),
+                               tags$p("There are no direct benefits to your participation in this research. However, your contributions will help to understand the 
+                                        social and economic impact of the support provided by In Place of War."),
+                               tags$p("There are no risks involved in this; you do not have to speak about anything which you do not want to. You can pause or stop 
+                                 answering questions at any time and if you want to withdraw from the research you are completely free to do so without giving any reasons.")),
+                             
+                             tags$p(style = 'font-weight:bold;',
+                                    "What happens if I do not want to take part or if I change my mind? "),
+                             tags$p("It is up to you to decide whether or not to take part. We will seek consent prior to sending you the questionnaire. 
+                                      If you do decide to take part, you will be given this information sheet to keep and will be asked to provide written 
+                                      consent via the informed consent form. If you decide to take part you are still free to withdraw at any time without 
+                                      giving a reason and without detriment to yourself. However, it will not be possible to remove your data from the project 
+                                      once it has been anonymised as we will not be able to identify your specific data. This does not affect your data 
+                                      protection rights. If you decide not to take part you do not need to do anything further. "),
+                             
+                             tags$p(style = 'font-weight:bold; text-decoration: underline; font-size: medium;',
+                                    "Data Protection and Confidentiality"),
+                             tags$p(style = 'font-weight:bold;',
+                                    "What information will you collect about me?"),
+                             tags$div(
+                               tags$p("In order to participate in this research project we will need to collect information 
+                                       that could identify you, called “personal identifiable information”. Specifically we will need to collect:"),
+                               tags$ul(
+                                 tags$li("Your name"), 
+                                 tags$li("Name of your organisation"),
+                                 tags$li("Area of residence"),
+                                 tags$li("Your gender"),
+                                 tags$li("Your age")),
+                               tags$p(style = 'font-weight:bold;', "Under what legal basis are you collecting this information"),
+                               tags$p("We are collecting and storing this personal identifiable information in accordance with data 
+                                      protection law which protect your rights.  These state that we must have a legal basis (specific 
+                                      reason) for collecting your data. For this study, the specific reason is that it is “a public 
+                                      interest task” and “a process necessary for research purposes”.")),
+                             
+                             tags$p(style = 'font-weight:bold;', "What are my rights in relation to the information you will collect about me?"),
+                             tags$div(
+                               tags$p("You have a number of rights under data protection law regarding your personal information. For example 
+                                       you can request a copy of the information we hold about you."),
+                               tags$p("If you would like to know more about your different rights or the way we use your personal information to 
+                                       ensure we follow the law, please consult our ", tags$a(href="http://documents.manchester.ac.uk/display.aspx?DocID=37095", "Privacy Notice for Research Participants", target="_blank"), ".")),
+                             
+                             tags$p(style = 'font-weight:bold;', "Will my participation in the study be confidential and my personal identifiable information be protected?"),
+                             tags$div(
+                               tags$p("In accordance with data protection law, The University of Manchester is the Data Controller for this project. This means 
+                                       that we are responsible for making sure your personal information is kept secure, confidential and used only in the way you have been told 
+                                       it will be used. All researchers are trained with this in mind, and your data will be looked after in the following way:"),
+                               tags$p("The study team (Mr Jack Adler-McKean, Ms Safa Ali, Ms Andreea Avramescu, Ms Magaly Duarte, Ms Natalie Emma Ilsley, Ms Marta Riccardi, 
+                                       Ms Réka Polonyi) will have access to your personal information, but they will anonymise it as soon as possible. Your name and any other 
+                                       identifying information will be removed and replaced with a random ID number. Only the research team will have access to the key that links this 
+                                       ID number to your personal information. Your consent form and contact details will be retained for 5 years on the In Place of War’s Google Drive. 
+                                       The data will not be transferred outside the EU or to any cloud services."),
+                               tags$p("Please also note that individuals from The University of Manchester or regulatory authorities may need to look at the data collected for 
+                                      this study to make sure the project is being carried out as planned. This may involve looking at identifiable data. All individuals involved in 
+                                      auditing and monitoring the study will have a strict duty of confidentiality to you as a research participant.")),
+                             
+                             tags$p(style = 'font-weight:bold;',
+                                    "What if I have a complaint?"),
+                             tags$div( 
+                               tags$p("Contact details for complaints:"),
+                               tags$p("If you have a complaint that you wish to direct to members of the research team, please contact: "),
+                               tags$ul(
+                                 tags$li(style = 'font-weight:bold;', "Ruth Daniel ruth.daniel@manchester.ac.uk +44 (0)7793215618"),
+                                 tags$li(style = 'font-weight:bold;',"Teresa Ó Brádaigh Bean teresa@inplaceofwar.net  +44 (0)7955006798")),
+                               tags$p(style = 'font-weight:bold;', "If you wish to make a formal complaint to someone independent of the 
+                                     research team or if you are not satisfied with the response you have gained from the researchers in 
+                                     the first instance then please contact:"),
+                               tags$p("The Research Governance and Integrity Officer, Research Office, Christie Building, 
+                                      The University of Manchester, Oxford Road, Manchester, M13 9PL, by emailing: ",
+                                      tags$b("research.complaints@manchester.ac.uk"), "or by telephoning:", tags$b( "0161 275 2674.")),
+                               tags$p("If you wish to contact us about your data protection rights, please email: dataprotection@manchester.ac.uk 
+                               or write to The Informa on Governance Office, Christie Building, The University of Manchester, Oxford Road, M13 9PL 
+                               at the University of Manchester and we will guide you through the process of exercising your rights.")),
+                             tags$p("You also have a right to complain to the ", tags$u("Information Commissioner's Office about complaints relating to your personal identifiable information"), "Tel 0303 123 1113"),
+                             tags$p(style = 'font-weight:bold;',
+                                    "Contact Details"
+                             ),
+                             tags$div(
+                               tags$p("If you have any queries about the study, if you would like a copy of these conditions, or if you are interested in taking part then please contact the researcher(s)"),
+                               tags$ul(
+                                 tags$li(style = 'font-weight:bold;', "Mr Jack Adler-McKean jack.adler-mckean@student.rncm.ac.uk "),
+                                 tags$li(style = 'font-weight:bold;', "Ms Safa Ali, safa.ali@postgrad.manchester.ac.uk "), 
+                                 tags$li(style = 'font-weight:bold;', "Ms Andreea Avramescu, andreea.avramescu@manchester.ac.uk "), 
+                                 tags$li(style = 'font-weight:bold;', "Ms Magaly Duarte, magaly.duarteurquhart@manchester.ac.uk "), 
+                                 tags$li(style = 'font-weight:bold;', "Ms Natalie Emma Ilsley natalie.ilsley@postgrad.manchester.ac.uk "), 
+                                 tags$li(style = 'font-weight:bold;', "Ms Réka Polonyi, reka.polonyi@manchester.ac.uk "), 
+                                 tags$li(style = 'font-weight:bold;', "Ms Marta Riccardi, m.riccardi@liverpool.ac.uk "))), 
+                             tags$div(style = 'font-weight:bold;', 
+                                      "Please read the following items and click the box at the bottom of the page if you agree."
+                             ),
+                             tags$br(),
+                             tags$div(style = 'margin-bottom: 5px;',
+                                      tags$ul(
+                                        tags$li("I confirm that I have read the 'Participant Information Sheet'
+                and have had the opportunity to consider the information about my involvement in the experiment."),
+                                        tags$li("I have been given the opportunity to ask questions about 
+                                          the project and my participation."),
+                                        tags$li("I voluntarily agree to participate in the project."),
+                                        tags$li("I understand that I do not have to answer any questions I do not feel comfortable with or I feel breach 
+                                          confidentiality. I can do this without giving a reason nor will I be asked why I do not want to answer."),
+                                        tags$li("I understand that I can withdraw any time after participating in the 
+                                                  questionnaire without giving reasons and that I will not be penalised for withdrawing nor will I 
+                                                  be questioned on why I have withdrawn."),
+                                        tags$li("The use of the data in research, reports, sharing and storing has been explained to me."))),
+                             
+                             tags$div(style = 'text-align: center; font-size: larger; font-weight:bold;',
+                                      shinyWidgets::awesomeCheckbox(
+                                        inputId = "agree",
+                                        label = "I agree to take part in this study.", 
+                                        value = F
+                                      )),
+                             shiny::textInput('name_id', label= "Please enter your full name below", ""),
+                             tags$br(),
+                             tags$br(),
+                             tags$div(style = "text-align: center; position: absolute; left: 20%; bottom: 10px; max-width: 300px;",
+                                      #button to end trial
+                                      shiny::actionButton(inputId = 'consent', 
+                                                          label = 'Submit Information and Continue', 
+                                                          width = '100%',
+                                                          class="fixed-bottom",
+                                                          style= "display: inline; color: white; font-weight: 400; font-size: 15px; background-color: #4C2984;"),
+                                      #hidden message that only appears when the submit button is clicked and the checkbox is not clicked
+                                      shinyjs::hidden(
+                                        tags$div(id='error_msg_info',
+                                                 tags$p(tags$span(style = "color:red", 
+                                                                  "You must agree (by clicking) the box in the 'Agreement' to continue"))
+                                        )
+                                        
+                                      ),#ends hidden
+                                      #hidden message that only appears when the submit button is clicked and the checkbox is not clicked
+                                      shinyjs::hidden(
+                                        tags$div(id='error_msg_signin',
+                                                 tags$p(tags$span(style = "color:red", 
+                                                                  "You must enter your full name above to continue."))
+                                        )
+                                        
+                                      ),#ends hidden 
+                                      
+                                      #hidden message that only appears when the submit button is clicked and the checkbox is not clicked
+                                      shinyjs::hidden(
+                                        tags$div(id='error_msg_both_intro',
+                                                 tags$p(tags$span(style = "color:red", 
+                                                                  "You must enter your Prolific id above and click the box in the 'Agreement' to continue."))
+                                        )
+                                        ),
+                             )
+                             
+                           ),
+                           
+                           ),
+                           shinyjs::hidden(
+                             div(id = "submit_info", align = "center", 
+                                 setBackgroundColor("MintCream"),
+                                 #section 1 -----
+                                 tags$h2("Section 1", style = "font-family: 'Impact', cursive; font-weight: 500; line-height: 1.1; color: #209e9a;"),
+                                
+                                 actionButton(inputId = "text", label = labelMandatory("Please click this box to enter your name")),
+                                 verbatimTextOutput(outputId = "text"),
+                              #   textInput("name", labelMandatory("Name"), ""),
+                                 
+                                 textInput("organisation", labelMandatory("Role in the organisation")),
+                                 selectInput(
+                                inputId =  "date_from", labelMandatory("Since when did you have this role in the organisation:"), choices = 1950:as.numeric(format(Sys.Date(),"%Y"))),
+
+                              multiInput(
+                                inputId = "Id010",
+                                label = "Countries :", 
+                                choices = NULL,
+                                choiceNames = lapply(seq_along(countries), 
+                                                     function(i) tagList(tags$img(src = flags[i],
+                                                                                  width = 20, 
+                                                                                  height = 15), countries[i])),
+                                choiceValues = countries
+                              ), 
+                              
+                                 selectInput("gender", labelMandatory("Gender"),
+                                             c("",  "Female", "Male", "Other", "Prefer not to say")),
+                                 
+                                 selectInput("age", labelMandatory("Age"),
+                                             c("",  "18 - 24", "25 - 34", "35 - 44", "45 - 54", "55 - 64", "65+")),
+                                 
+                                 selectInput("activity1", labelMandatory("What is the main activity of your organisation?"),
+                                             c("",  "Music", "Theatre", "Dance", "Visual Arts", "Combined Arts")),
+                                 
+                                   awesomeCheckboxGroup(
+                                     inputId = "function",
+                                     label = labelMandatory("What function(s) does your organisation fulfil? Select all that apply."),
+                                     choices = c("Cultural centre",
+                                                 "Educational Provision",
+                                                 "Community hub",
+                                                 "Artist live-work space",
+                                                 "Artist collective",
+                                                 "Other")),
+                              # theme styling ####
+                              tags$head(tags$style(HTML('#function :after, #function :before{background-color:#209e9a;}'))), 
+                                 
+                                 textInput("function_other", "If selected, please specify which 'other'"),
+                                 
+                                 awesomeCheckboxGroup(
+                                   inputId = "activity",
+                                   label = labelMandatory("Which IPoW activities have you participated in? Select all that apply."),
+                                   choices = c("Financial support - Covid emergency fund",
+                                               "Cultural space development - equipment donation",
+                                               "Cultural space development - technical training",
+                                               "Cultural space development - building of cultural space",
+                                               "Cultural space development - other",
+                                               "Education and Entrepreneurship - CASE programme",
+                                               "Education and Entrepreneurship - other",
+                                               "Organisation development",
+                                               "Network building - overseas travel",
+                                               "Network building - hosting IPoW and its members",
+                                               "Network building - connecting online",
+                                               "Other")),
+                              # theme styling ####
+                              tags$head(tags$style(HTML('#activity :after, #activity :before{background-color:#209e9a;}'))), 
+                              
+                                 
+                                 textInput("activity_other", "If selected, please specify which 'other'"),
+                                 
+                              radioGroupButtons(
+                                inputId = "time",
+                                label = labelMandatory("How long you have been involved in activities with IPoW?"),
+                                choices =  c("3 months or less", "3 - 6 months", "6 - 12 months", "1 - 2 years", "3 - 4 years", "5 - 6 years", "7 - 10 years", "More than 10 years"),
+                               # status = "primary",
+                                checkIcon = list(yes = icon("ok", lib = "glyphicon"), no = icon("remove", lib = "glyphicon"))),
+                              # theme styling ####
+                              tags$head(tags$style(HTML('#time :after, #time :before{background-color:#209e9a;}'))), 
+                              
+                                 textInput("currency", labelMandatory("Which unit of currency you use for your activities?")),
+                                 
+                                 ("Please use this currency when answering questions throughout the questionnaire"),
+                                 
+                                 
+                                 #section 2 -----
+                                 tags$h2("Section 2", style = "font-family: 'Impact', cursive; font-weight: 500; line-height: 1.1; color: #4B0082;"),
+                              
+                                 textInput("fin_support_time", labelMandatory("When did you first start receiving support from IPoW? For example, financial support, equipment donation, training and/or network building.")),
+                                 
+                                 textInput("fin_support_tot", labelMandatory("How much financial support have you received from IPoW on average per year? This includes direct money and equipment donations.")),
+                                 
+                                 ("What is the approximate annual revenue/turnover for your organisation? Use the questions below to estimate the total for:"),
+                                 
+                                 textInput("fin_support_year3", labelMandatory("Three years before you received support from IPoW:")),
+                                 
+                                 textInput("fin_support_year2", labelMandatory("Two years before you received support from IPoW:")),
+                                 
+                                 textInput("fin_support_year1", labelMandatory("One year before you received support from IPoW:")),
+                                 
+                                 textInput("fin_support_1", labelMandatory("The first year you received support from IPoW:")),
+                                 
+                                 textInput("fin_support_2", "The second year you received support from IPoW (if appropriate):"),
+                                 
+                                 textInput("fin_support_3", "The third year you received support from IPoW (if appropriate):"),
+                                 
+                                 textInput("fin_support_4", "The fourth year you received support from IPoW (if appropriate):"),
+                                 
+                                 textInput("fin_support_5", "The average of the fifth and subsequent year(s) you received support from IPoW (if appropriate):"),
+                          
+                                 radioGroupButtons(
+                                  inputId = "hours",
+                                  label = labelMandatory("How many hours do you work on average per week since you started receiving support from IPoW?"),
+                                  choices =  c("1 - 5 hours", "6 - 10 hours", "11 - 15 hours", "16 - 20 hours", "21 - 25 hours", "26 - 30 hours", "31 - 35 hours", "36 - 40 hours", "More than 40 hours"),
+                                  status = "primary",
+                                  checkIcon = list(yes = icon("ok", lib = "glyphicon"), no = icon("remove", lib = "glyphicon"))),
+                                 
+                              radioGroupButtons(
+                                inputId = "post_hours",
+                                label = labelMandatory("How many hours did you work on average per week after you started receiving support from IPoW?"),
+                                choices =  c("1 - 5 hours", "6 - 10 hours", "11 - 15 hours", "16 - 20 hours", "21 - 25 hours", "26 - 30 hours", "31 - 35 hours", "36 - 40 hours", "More than 40 hours"),
+                                status = "primary",
+                                checkIcon = list(yes = icon("ok", lib = "glyphicon"), no = icon("remove", lib = "glyphicon"))),
+                              
+                                 ("If you are happy to share your personal income level with us, please answer questions 5a and 5b below. If not, please proceed directly to question 6"),
+                                 
+                              radioGroupButtons(
+                                inputId = "post_income",
+                                label = labelMandatory("How has your personal income level changed (if at all) since your first financial support from IPoW?"),
+                                choices =  c("Decreased by more than 25%", "Decreased by 15-25%", "Decreased by 5-15%", "Decreased by less than 5%", "Unchanged", "Increased by less than 5%", "Increased by 5-15%", "Increased by 15-25%", "Increased by more than 25%"),
+                                status = "primary",
+                                checkIcon = list(yes = icon("ok", lib = "glyphicon"), no = icon("remove", lib = "glyphicon"))),
+                              
+                              switchInput(
+                                inputId = "opportunity",
+                                label = labelMandatory("Did the support you received from IPoW enable new economic opportunities for you or your organisation?"), 
+                                onLabel = "Yes, please answer questions 7b and/or 7c below",
+                                offLabel = "No, please skip to question 8a",
+                                onStatus = "success", 
+                                offStatus = "danger"
+                              ),
+                              
+                                 awesomeCheckboxGroup(
+                                   inputId = "opportunity2",
+                                   label = "Which of the following economic opportunities have been enabled?",
+                                   choices = c("New paid employment opportunities in teaching/training",
+                                               "New paid employment opportunities in technical services (recording or live events)",
+                                               "The hiring out of equipment or space",
+                                               "The selling of products or services",
+                                               "Support from stakeholders (such as local government, funders, NGOs, educational institutions, cultural organizations)",
+                                               "Partnerships",
+                                               "Other")),
+                              # theme styling ####
+                              tags$head(tags$style(HTML('#opportunity2 :after, #opportunity2 :before{background-color:#4B0082;}'))), 
+                              
+                                
+                                 textInput("opportunity2_other", "If selected, please specify which 'other'"),
+                                 
+                              radioGroupButtons(
+                                inputId = "income_change",
+                                label = "If you answered Yes to 7a, by approximately how much has your personal income level changed?",
+                                choices =  c("Increased by less than 5%", "Increased by 5-15%", "Increased by 15-25%"),
+                                status = "primary",
+                                checkIcon = list(yes = icon("ok", lib = "glyphicon"), no = icon("remove", lib = "glyphicon"))),
+                              
+                              radioGroupButtons(
+                                inputId = "revenue_change",
+                                label = "If you answered Yes to 7a, by approximately how much has your organisation’s annual revenue/turnover changed?",
+                                choices =  c("Increased by less than 5%", "Increased by 5-15%", "Increased by 15-25%"),
+                                status = "primary",
+                                checkIcon = list(yes = icon("ok", lib = "glyphicon"), no = icon("remove", lib = "glyphicon"))),
+                              
+                              radioGroupButtons(
+                                inputId = "volunteer",
+                                label = labelMandatory("Are there any parts of your organisation involving volunteers?"),
+                                choices =  c("Yes, please answer questions 8b, 8c and 8d below", "No, please skip to question 9"),
+                                status = "primary",
+                                checkIcon = list(yes = icon("ok", lib = "glyphicon"), no = icon("remove", lib = "glyphicon"))),
+                              
+                                 textInput("volunteer_num", "How many volunteers are involved in your organisation?"),
+                              
+                              radioGroupButtons(
+                                inputId = "volunteer_hours",
+                                label = "How many hours each per week on average do your volunteers contribute to your organisation?",
+                                choices =  c("1 - 5 hours", "6 - 10 hours", "11 - 15 hours", "16 - 20 hours", "21 - 25 hours", "26 - 30 hours", "31 - 35 hours", "36 - 40 hours", "More than 40 hours"),
+                                status = "primary",
+                                checkIcon = list(yes = icon("ok", lib = "glyphicon"), no = icon("remove", lib = "glyphicon"))),
+                              
+                                 textInput("volunteer_resp", "What responsibilities do volunteers have in your organisation?"),
+                              
+                                 ("What economic activities do you undertake with the funding you receive from IPoW? Please use the following questions to estimate the percentage (if any) of your funding used for each activity."),
+                                 
+                                 knobInput(
+                                   inputId = "perc_employees", label = "Pay employees:", value = 0, min = 0,
+                                   displayPrevious = TRUE, lineCap = "round", fgColor = "#4B0082", inputColor = "#4B0082"), 
+                                 
+                                 knobInput(
+                                   inputId = "perc_rent", label = "Pay rent:", value = 0, min = 0,
+                                   displayPrevious = TRUE, lineCap = "round", fgColor = "#4B0082", inputColor = "#4B0082"), 
+                                
+                                 knobInput(
+                                   inputId = "perc_equipment", label = "Invest in equipment", value = 0, min = 0,
+                                   displayPrevious = TRUE, lineCap = "round", fgColor = "#4B0082", inputColor = "#4B0082"), 
+                                 
+                                 knobInput(
+                                   inputId = "perc_donation", label = "Provide donations for individuals:", value = 0, min = 0,
+                                   displayPrevious = TRUE, lineCap = "round", fgColor = "#4B0082", inputColor = "#4B0082"), 
+                                 
+                                 knobInput(
+                                   inputId = "perc_events", label = "Organise events:", value = 0, min = 0,
+                                   displayPrevious = TRUE, lineCap = "round", fgColor = "#4B0082", inputColor = "#4B0082"), 
+                                 
+                                 knobInput(
+                                   inputId = "perc_training", label = "Provide training:", value = 0, min = 0,
+                                   displayPrevious = TRUE, lineCap = "round", fgColor = "#4B0082", inputColor = "#4B0082"), 
+                                
+                                 textInput("perc_other", "Other"),
+                                 
+                                 textInput("budget", "If you are happy to share your budget with us in more detail, or have any further comments on financial matters, please provide it here or upload a document below."),
+                                 fileInput("budget_upload", "Choose file"),
+                                 
+                                 #section 3 ------
+                                 tags$h2("Section 3", style = "font-family: 'Impact', cursive; font-weight: 500; line-height: 1.1; color: #DC143C;"),
+                              
+                                 awesomeCheckboxGroup(
+                                   inputId = "other_funding",
+                                   label = labelMandatory("Do you receive funding from any other organisation, apart from IPoW? If so, please select all that apply."),
+                                   choices = c("Government (any level)", 
+                                               "Public donation", 
+                                               "Private donations", 
+                                               "Trusts/Foundations", 
+                                               "None", 
+                                               "Other")),
+                              # theme styling ####
+                              tags$head(tags$style(HTML('#other_funding :after, #other_funding :before{background-color:#DC143C;}'))), 
+                              
+                            
+                                 textInput("other_funding1", labelMandatory("If selected, please specify which 'other'")),
+                                 
+                                 textInput("ipow_funding_imp", labelMandatory("How would you describe the importance of funding you received from IPoW in up to five single words?")),
+                                 
+                                 textInput("ipow_funding_imp2", "Please explain your choice"),
+                                 
+                              switchInput(
+                                inputId = "ipow_funding_diff",
+                                label = labelMandatory("Has support from IPoW (financial or material) made a difference to your organisation?"), 
+                                onLabel = "Yes",
+                                offLabel = "No",
+                                onStatus = "success", 
+                                offStatus = "danger"
+                              ),
+                              
+                                 textInput("ipow_funding_diff2", "If yes, please explain how"),
+                                 
+                              switchInput(
+                                inputId = "ipow_funding_comm",
+                                label = labelMandatory("Has support from IPoW (financial or material) made an economic difference to your wider community?"), 
+                                onLabel = "Yes",
+                                offLabel = "No",
+                                onStatus = "success", 
+                                offStatus = "danger"
+                              ),
+                              
+                                 textInput("ipow_funding_comm2", "If yes, please explain how"),
+                                 
+                              switchInput(
+                                inputId = "ipow_funding_help",
+                                label = "If you can share with us a particular case where someone’s life has been changed as a result of interacting with your organisation, please provide it here.", 
+                                onLabel = "Yes",
+                                offLabel = "No",
+                                onStatus = "success", 
+                                offStatus = "danger"
+                              ),
+                              
+                                 textInput("ipow_funding_help2", "If yes, please tell us how."),
+                                 
+                                 knobInput(
+                                   inputId = "ipow_funding_depend", labelMandatory("To what extent do you rely on funding from IPoW for maintaining your activities:"), value = 0, min = 0,
+                                   displayPrevious = TRUE, lineCap = "round", fgColor = "#DC143C", inputColor = "#DC143C"), 
+                                 
+                                 textInput("ipow_funding_depend2", "Please explain your answer"),
+                                 
+                              switchInput(
+                                inputId = "ipow_funding_time",
+                                label = labelMandatory("Do you feel that this reliance has changed over time, since the beginning of IPoW’s support?"), 
+                                onLabel = "Yes",
+                                offLabel = "No",
+                                onStatus = "success", 
+                                offStatus = "danger"
+                              ),
+                              
+                                 textInput("ipow_funding_time2", "If yes, please tell us more about this"),
+                                 
+                              switchInput(
+                                inputId = "ipow_funding_time",
+                                label = labelMandatory("Can you envisage IPoW supporting your organisation in the future?"), 
+                                onLabel = "Yes",
+                                offLabel = "No",
+                                onStatus = "success", 
+                                offStatus = "danger"
+                              ),
+                                 
+                                 textInput("ipow_funding_future2", "If yes, in what ways can you see this support being used, and what financial level?"),
+                                
+                              radioGroupButtons(
+                                inputId = "sustainable",
+                                label = labelMandatory("Do you envisage your organisation becoming self-sustainable (not needing support from IPoW or similar organisations)?"),
+                                choices =  c( "Yes", "No", "Already self-sustainable"),
+                                status = "primary",
+                                checkIcon = list(yes = icon("ok", lib = "glyphicon"), no = icon("remove", lib = "glyphicon"))),
+                              
+                              radioGroupButtons(
+                                inputId = "sustainable_time",
+                                label = "If yes, how long do you think it will be before your organisation is in this position?",
+                                choices =  c("1 - 2 years", "3 - 4 years", "5 - 6 years", "7 - 8 years", "3 - 4 years", "5 - 6 years", "7 - 8 years", "9 - 10 years", "More than 10 years"),
+                                status = "primary",
+                                checkIcon = list(yes = icon("ok", lib = "glyphicon"), no = icon("remove", lib = "glyphicon"))),
+                              
+                                 textInput("sustainable3", "Please explain your choices above"),
+                                 
+                                 #section 4 ------
+                                 tags$h2("Section 4", style = "font-family: 'Impact', cursive; font-weight: 500; line-height: 1.1; color: #FF7F50;"),
+                              
+                                 awesomeCheckboxGroup(
+                                   inputId = "activities",
+                                   label = labelMandatory("Which type of activities or services do you provide? Please select all that apply."),
+                                   choices = c("Cultural space", "Artistic Hub", "Creative Workshops", "Artistic production", "Artistic mentoring", "Rehearsal spaces", "Performance", "Community kitchen",
+                                               "Urban farm", "Revitalising or repairing public spaces", "Clothing donations", "Education and training", "Venue and equipment hire", "Selling goods and services", 
+                                               "Health and well-being services", "Other")),
+                              # theme styling ####
+                              tags$head(tags$style(HTML('#activities :after, #activities :before{background-color:#FF7F50;}'))), 
+                              
+                                 
+                                 textInput("activities_other", "If selected, please specify which 'other'"),
+                                 
+                                 knobInput(
+                                   inputId = "activities_num", labelMandatory("How many activities do you organise on average per year?"), value = 0, min = 0,
+                                   displayPrevious = TRUE, lineCap = "round", fgColor = "#FF7F50", inputColor = "#FF7F50"), 
+
+                                 checkboxInput("activities_num2", "More than 100"),
+                              # theme styling ####
+                              tags$head(tags$style(HTML('#activities_num2 :after, #activities_num2 :before{background-color:#FF7F50;}'))), 
+                              
+                                 
+                                 ("Answer question 3 in reference to your most successful activities. If these activities are a continuation from previous activities that you were offering, answer questions 3a) and b). If they are they new initiatives, answer question 3c."),
+                                 
+                                 textInput("activities_reason", labelMandatory("Why did you choose to run these activities in particular?")),
+                                 
+                                 textInput("activities_fund", labelMandatory("If IPoW offered financial assistance to run these activities, how were these funds used?")),
+                                 
+                                 textInput("activities_new", labelMandatory("Why did you choose these activities in particular?")),
+                                 
+                                 switchInput(
+                                   inputId = "extra_funding",
+                                   label = labelMandatory("Do you receive support or advice from any other organisations (including online)?"), 
+                                   onLabel = "Yes",
+                                   offLabel = "No",
+                                   onStatus = "success", 
+                                   offStatus = "danger"
+                                 ),
+                               
+                                 textInput("extra_funding2", "If yes, which organisations have been involved?"),
+                                 
+                                 switchInput(
+                                   inputId = "activities_change",
+                                   label = labelMandatory("Have your activities changed over time since you became involved with IPoW?"), 
+                                   onLabel = "Yes",
+                                   offLabel = "No",
+                                   onStatus = "success", 
+                                   offStatus = "danger"
+                                 ),
+                                 
+                                 textInput("activities_change2", "Please explain your choice"),
+                                 
+                                 #section 5 ----
+                                 tags$h2("Section 5", style = "font-family: 'Impact', cursive; font-weight: 500; line-height: 1.1; color: #FFD700;"),
+                              
+                                 ("Please answer the following questions in reference to the same activities as in the previous section."),
+                                 
+                                 knobInput(
+                                   inputId = "part_men", labelMandatory("What percentage of your participants identify as male?"), value = 0, min = 0,
+                                   displayPrevious = TRUE, lineCap = "round", fgColor = "#FFD700", inputColor = "#FFD700"), 
+                                 
+                                 knobInput(
+                                   inputId = "part_female", labelMandatory("What percentage of your participants identify as female?"), value = 0, min = 0,
+                                   displayPrevious = TRUE, lineCap = "round", fgColor = "#FFD700", inputColor = "#FFD700"), 
+                                 
+                                 knobInput(
+                                   inputId = "part_neutral", labelMandatory("What percentage of your participants identify as neither male nor female?"), value = 0, min = 0,
+                                   displayPrevious = TRUE, lineCap = "round", fgColor = "#FFD700", inputColor = "#FFD700"), 
+                                 
+                                 radioGroupButtons(
+                                   inputId = "part_age",
+                                   label = labelMandatory("What is the average age of your participants?"),
+                                   choices =  c( "Under 18", "18 - 24", "25 - 34", "35 - 44", "45 - 54", "55 - 64", "65+"),
+                                   status = "primary",
+                                   checkIcon = list(yes = icon("ok", lib = "glyphicon"), no = icon("remove", lib = "glyphicon"))),
+
+                                 awesomeCheckboxGroup(
+                                   inputId = "part_status",
+                                   label = labelMandatory("How would you best describe the participants who benefit from your work?"),
+                                   choices = c( "Children and adolescents", 
+                                                "People at risk of violence and/or abuse", 
+                                                "Elderly people", 
+                                                "Refugees, displaced people or undocumented migrants", 
+                                                "People with disabilities and health conditions", 
+                                                "Women and girls", 
+                                                "Minority ethnic groups/indigenous communities", 
+                                                "Those living in extreme poverty (on less than $1.90 a day)")),
+                              # theme styling ####
+                              tags$head(tags$style(HTML('#part_status :after, #part_status :before{background-color:#FFD700;}'))), 
+                              
+                              
+                                 textInput("part_continue", labelMandatory("How do you encourage participation in your programme?")),
+                                 
+                                 textInput("part_words", labelMandatory("Using up to five single words, how would you describe participation in the activities?")),
+                                 
+                                 textInput("part_words2", "Please explain why you choose the words above"),
+                                 
+                              switchInput(
+                                inputId = "part_change",
+                                label = labelMandatory("Have you seen a change in participation since you first received support from IPoW?"), 
+                                onLabel = "Yes, proceed to question 8b",
+                                offLabel = "No, skip to question 9",
+                                onStatus = "success", 
+                                offStatus = "danger"
+                              ),
+                              
+                                 textInput("part_change2", "How and why do you think this change in participation has occurred?"),
+                                 
+                                 #section 6 -----
+                                 tags$h2("Section 6", style = "font-family: 'Impact', cursive; font-weight: 500; line-height: 1.1; color: #00FFFF;"),
+                              
+                                 awesomeCheckboxGroup(
+                                   inputId = "participation_benefit",
+                                   label = labelMandatory("Since being involved as an IPoW change-maker, I have..."),
+                                   choices = c("...made new friends", 
+                                               "...become interested in something new", "...learnt about other people's needs",
+                                               "...tried things I haven't done before", "...become more confident in my work",
+                                               "...decided to do some training or course", "...felt better or healthier (mentally and/or physically)",
+                                               "...become keen to help in local projects", "...been happier", "None of the above", "Other")),
+                              # theme styling ####
+                              tags$head(tags$style(HTML('#participation_benefit :after, #participation_benefit :before{background-color:#00FFFF;}'))), 
+                              
+                                 textInput("participation_benefit2", "If selected, please specify which 'other'"),
+                                 
+                                 awesomeCheckboxGroup(
+                                   inputId = "skills",
+                                   label = labelMandatory("What new skills have you acquired since becoming an IPoW change maker?"),
+                                   choices = c("Entrepreneurial skills",
+                                               "Technical skills - music",
+                                               "Technical skills - theatre",
+                                               "Technical skills - arts",
+                                               "Team leadership", "Community organisation", "Teaching/training others", "None of the above", "Other")),
+                              # theme styling ####
+                              tags$head(tags$style(HTML('#skills :after, #skills :before{background-color:#00FFFF;}'))), 
+                              
+                              
+                                 textInput("skills2", "If selected, please specify which 'other'"),
+                                 
+                                 awesomeCheckboxGroup(
+                                   inputId = "skills_where",
+                                   label = labelMandatory("How did you learn these skills?"),
+                                   choices = c("Internet resources", 
+                                               "Professional in the field", 
+                                               "Online course", "In-person course",
+                                               "Peers, friends and family", "Other")),
+
+                                 textInput("skills_where2", "If selected, please specify which 'other'"),
+                                 
+                                 textInput("skills_details", "Please add details for the resources/course mentioned above"),
+                                 
+                              radioGroupButtons(
+                                inputId = "resources",
+                                label = labelMandatory("Do you feel that you have access to enough sources of training?"),
+                                choices =  c( "Strongly disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"),
+                                status = "primary",
+                                checkIcon = list(yes = icon("ok", lib = "glyphicon"), no = icon("remove", lib = "glyphicon"))),
+                              
+                              radioGroupButtons(
+                                inputId = "continue_part",
+                                label = labelMandatory("How long do you envisage being able to continue as a change-maker?"),
+                                choices =  c( "Less than a year", "1 - 2 years", "3 - 4 years", "5 or more years", "Indefinitely"),
+                                status = "primary",
+                                checkIcon = list(yes = icon("ok", lib = "glyphicon"), no = icon("remove", lib = "glyphicon"))),
+                              
+                              radioGroupButtons(
+                                inputId = "apprentice",
+                                label = labelMandatory("Are you training an apprentice to continue your work in the future?"),
+                                choices =  c( "Yes", "No", "No, but I would like to"),
+                                status = "primary",
+                                checkIcon = list(yes = icon("ok", lib = "glyphicon"), no = icon("remove", lib = "glyphicon"))),
+                              
+                                 textInput("apprentice_yes", "If yes, please explain how"),
+                                 
+                                 #section 7 -----
+                                 tags$h2("Section 7", style = "font-family: 'Impact', cursive; font-weight: 500; line-height: 1.1; color: #3CB371;"),
+                              
+                                 textInput("needs_community", labelMandatory("In a few words, what would you say are the needs that you have most successfully addressed in your community?")),
+                                 
+                                 textInput("needs_find", labelMandatory("How were these needs identified?")),
+                                 
+                                 knobInput(
+                                   inputId = "needs_met", labelMandatory("To what degree have these needs been met?"), value = 0, min = 0,
+                                   displayPrevious = TRUE, lineCap = "round", fgColor = "#3CB371", inputColor = "#3CB371"), 
+                                 
+                             radioGroupButtons(
+                               inputId = "more_part",
+                               label = labelMandatory("How many more participants would you ideally like to involve in your programme?"),
+                               choices =  c("1-10", "11-50", "51-100", "101-500", "500-2000", "more than 2000"),
+                             status = "primary",
+                             checkIcon = list(yes = icon("ok", lib = "glyphicon"), no = icon("remove", lib = "glyphicon"))),
+                    
+                                 textInput("success_words", labelMandatory("Which five single words describe what a successful programme means to you?")),
+                                 
+                                 textInput("success_words2", "Please explain your choice of words"),
+                                 
+                                 textInput("participants_change", labelMandatory("Do your participants themselves help shape the development of your organisation? If so, how?")),
+                                 
+                                 #section 8 -----
+                                 tags$h2("Section 8", style = "font-family: 'Impact', cursive; font-weight: 500; line-height: 1.1; color: #6495ED;"),
+                              
+                                 radioButtons("training", labelMandatory("Did you receive training from IPoW?"),
+                                              c( "Yes", "No")),
+                                 
+                                 awesomeCheckboxGroup(
+                                   inputId = "training_type",
+                                   label = "What kind of training have you received from IPoW? Select all that apply.",
+                                   choices = c("Artistic training", 
+                                               "Organisational and professional development training (drafting proposals, budgets, events, evaluations and monitoring)",
+                                               "Technical training (music production, equipment, forum theatre, teacher training, research training)",
+                                               "Enterprise training", "Mentoring", "Other")),
+                             # theme styling ####
+                             tags$head(tags$style(HTML('#training_type :after, #training_type :before{background-color:	#6495ED;}'))), 
+                             
+
+                                 textInput("training_type2", "If selected, please specify which 'other'"),
+                                 
+                                 switchInput(
+                                    inputId = "training_change",
+                                    label = "Has the training you received made a change to your activities?", 
+                                    onLabel = "Yes",
+                                    offLabel = "No",
+                                    onStatus = "success", 
+                                    offStatus = "danger"
+                                    ),
+                    
+                                 textInput("training_change2", "Please explain your answer above"),
+                                 
+                                 knobInput(
+                                   inputId = "training_others", label = "How confident are you that you can train others in what you have been trained in yourself?", value = 0, min = 0,
+                                   displayPrevious = TRUE, lineCap = "round", fgColor = "#6495ED", inputColor = "#6495ED"), 
+                                 
+                                 textInput("training_others2", "Please explain your rating"),
+                                 
+                                 knobInput(
+                                   inputId = "training_relevant", label = "How relevant do you feel that your training has been to helping your community?", value = 0, min = 0,
+                                   displayPrevious = TRUE, lineCap = "round", fgColor = "#6495ED", inputColor = "#6495ED"), 
+                                 
+                                 textInput("training_relevant2", "Please explain your rating"),
+                                 
+                                 textInput("training_long_term", labelMandatory("What kind of training would help keep your programme successful for the long-term?")),
+                                 
+                                 actionButton("submit_button", "Submit", class = "btn-primary")
+                             )
+                           ),
+                           
+                           shinyjs::hidden(
+                             div(
+                               id = "thankyou_msg",
+                               h3("¡Gracias por su tiempo! Sus respuestas son muy útiles para nosotros."),
+                               actionLink("submit_another", "Submit another response")
+                             )
+                           )
+                    ),
+                  )
+                )
+
+server = function(input, output, session) {
+  result_auth <- secure_server(check_credentials = check_credentials(credentials))
+  
+  output$res_auth <- renderPrint({
+    reactiveValuesToList(result_auth)
+  })
+  
+  #clicking button   
+  observeEvent(input$consent, {
+    
+    #if they check the box that they agree and the input for the prolific id is not empty
+    if(input$agree == T & input$name_id != '') {
+      
+      shinyjs::show("submit_info")
+      shinyjs::hide("form")
+      shinyjs::hide("consent")
+      
+      #this is storing the data from the login page
+      assignment_data_start <- data.frame( name_id = input$name_id,
+                                           agreement = input$agree,
+                                           start_time = format(Sys.time(), "%H:%M:%S"))
+      
+      #this encrypts the data column with the prolific id.
+      # encrypted_data_start = assignment_data_start %>% encryptr::encrypt(name_id)
+      
+      #location and file name to store the data
+      file_start <- file.path(paste('Name','_',format(Sys.time(), "%H_%M_%S"),'.csv',sep=''))
+      
+      write.csv(file_start, row.names = FALSE)
+      
+    } else if (input$agree == F & input$name_id != ''){
+      shinyjs::hide(id = 'error_msg_both_intro')
+      shinyjs::show(id = 'error_msg_info')
+      
+    } else if (input$name_id == '' & input$agree == T){
+      shinyjs::hide(id = 'error_msg_both_intro')
+      shinyjs::show(id = 'error_msg_signin')
+      
+    } else if (input$agree == F & input$name_id == ''){
+      shinyjs::show(id = 'error_msg_both_intro')
+    }
+  })
+
+  observeEvent(input$text, {
+    inputSweetAlert(
+      session = session, inputId = "mytext", input = "text",
+      title = "What's your name ?"
+    )
+  })
+  output$text <- renderPrint(input$mytext)
+  
+  # Enable the Submit button when all mandatory fields are filled out
+  observe({
+    mandatoryFilled <-
+      vapply(fieldsMandatory,
+             function(x) {
+               !is.null(input[[x]]) && input[[x]] != ""
+             },
+             logical(1))
+    mandatoryFilled <- all(mandatoryFilled)
+    shinyjs::toggleState(id = "submit_button", condition = mandatoryFilled)
+  })
+  
+  # Gather all the form inputs (and add timestamp)
+  formData <- reactive({
+    data <- sapply(fieldsAll, function(x) input[[x]])
+    data <- c(data, timestamp = epochTime())
+    data <- t(data)
+    data
+  })    
+  
+  
+  # submit another response
+  observeEvent(input$submit_button, {
+    shinyjs::show("thankyou_msg")
+    shinyjs::hide("submit_info")
+  })
+  
+  observeEvent(input$submit_another, {
+    shinyjs::show("submit_info")
+    shinyjs::hide("thankyou_msg")
+  })
+  
+  
+  # Show the responses in the admin table
+  output$responsesTable <- DT::renderDataTable({
+    data <- loadData()
+    data$timestamp <- as.POSIXct(data$timestamp, origin="1970-01-01")
+    DT::datatable(
+      data,
+      rownames = FALSE,
+      options = list(searching = FALSE, lengthChange = FALSE)
+    )
+  })
+  
+}
+
+shinyApp(ui = ui, server = server)

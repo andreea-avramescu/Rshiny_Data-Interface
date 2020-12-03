@@ -1,0 +1,60 @@
+#libraries
+library(shinyBS)
+library(jsonlite)
+library(V8)
+library(shinyjs)
+
+steps <- read.csv("./help.csv")
+#ui
+
+shinyjs::useShinyjs(),
+shinyjs::extendShinyjs(text = jsCode, functions = c("pageCol")),
+
+
+# Include IntroJS styling
+    includeCSS("introjs.css"),
+    
+    # Include IntroJS library
+    includeScript("intro.js"),
+    
+    # Include javascript code to make shiny communicate with introJS
+    includeScript("app.js")
+
+****************************************
+you will wrap all the contents you want highlighted and account for in your csv steps in a div, example:
+tags$div(id="step3",
+        shinydashboard::box(
+          id = 'solution_summary',
+          width = 100,
+          align = 'center',
+          title = "Summary of Current Solution",
+          status = "primary",
+....)
+
+
+#server
+#************************Start Goal Adjustment ************************************************** 
+  # -------------------- Set IntroJS data and event listener ---------------------#
+  # set help content
+  session$sendCustomMessage(type = 'setHelpContent', message = list(steps = toJSON(steps) ))
+  
+  # listen to the action button
+  observeEvent(input$startHelp,{
+    
+    # on click, send custom message to start help
+    session$sendCustomMessage(type = 'startHelp', message = list(""))
+    
+  })
+  
+  # -------------------- END: Set IntroJS data and event listener ---------------------#
+  
+
+
+#to reset the steps - start at step 1:
+session$sendCustomMessage(type = 'startHelp', message = list(""))
+
+
+
+
+
+
